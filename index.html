@@ -217,7 +217,7 @@ pre.json{margin:0;padding:12px;border-radius:8px;background:var(--surface-2);fon
     </div>
     <p class="msg" id="noImages" hidden>In dieser Ansicht kann Claude keine Fotos auswerten. Beschreibe die Mahlzeit in Worten oder öffne die Seite im Browser unter claude.ai, wo du angemeldet bist.</p>
     <p class="muted mono" id="diag" role="status">Status: prüfe Verbindung zu Claude …</p>
-    <p class="msg" id="aiOff" hidden>Die automatische Erkennung ist in dieser Ansicht nicht verfügbar. Öffne den Link im Browser unter claude.ai und melde dich an. Von Hand eintragen geht hier trotzdem.</p>
+    <p class="msg" id="aiOff" hidden>Die automatische Erkennung ist in dieser Ansicht nicht verfügbar. Nutze unten „Foto im Claude-Chat auswerten“ oder trage die Mahlzeit von Hand ein.</p>
 
     <div class="field">
       <label class="cap" for="note">Beschreibung (optional)</label>
@@ -247,6 +247,17 @@ pre.json{margin:0;padding:12px;border-radius:8px;background:var(--surface-2);fon
       <button type="button" class="btn small" id="stopBtn">Stopp</button>
     </div>
     <p class="msg" id="msg" hidden role="alert"></p>
+    <details class="refine" id="chatBox">
+      <summary>Foto im Claude-Chat auswerten (ohne Zusatzkosten)</summary>
+      <div class="stack">
+        <p class="muted">1. Anweisung kopieren. 2. In der Claude-App oder im Chat das Foto senden und die Anweisung einfügen. 3. Die Antwort von Claude kopieren und hier einfügen.</p>
+        <button type="button" class="btn small" id="copyPrompt">Anweisung kopieren</button>
+        <textarea id="promptFallback" rows="4" hidden readonly aria-label="Anweisung zum Kopieren"></textarea>
+        <label class="cap" for="pasteIn">Antwort von Claude</label>
+        <textarea id="pasteIn" rows="4" placeholder="Antwort hier einfügen" autocomplete="off" spellcheck="false"></textarea>
+        <button type="button" class="btn small" id="pasteApply">Übernehmen</button>
+      </div>
+    </details>
 
     <section class="label" id="result" hidden aria-label="Geschätzte Nährwerte">
       <div class="label-head">
@@ -344,8 +355,8 @@ pre.json{margin:0;padding:12px;border-radius:8px;background:var(--surface-2);fon
   <!-- OPTIONEN -->
   <section id="view-settings" class="stack" hidden aria-labelledby="tab-settings">
     <div class="panel stack">
-      <h2 class="h-sm" style="margin:0">Foto-Erkennung</h2>
-      <p>Die Erkennung läuft über die Anthropic-API mit deinem eigenen Schlüssel. Der Schlüssel bleibt in diesem Browser und wird nur an api.anthropic.com gesendet. Jede Schätzung verbraucht etwas Guthaben deines API-Kontos.</p>
+      <h2 class="h-sm" style="margin:0">Foto-Erkennung mit eigenem Schlüssel (optional)</h2>
+      <p>Ohne Schlüssel kannst du Fotos kostenlos über den Claude-Chat auswerten (siehe „Erfassen“). Mit einem Anthropic-API-Schlüssel läuft die Erkennung direkt in der App. Der Schlüssel bleibt in diesem Browser und wird nur an api.anthropic.com gesendet. Jede Schätzung verbraucht dann etwas Guthaben deines API-Kontos.</p>
       <div class="field">
         <label class="cap" for="keyInput">API-Schlüssel</label>
         <input class="inp" id="keyInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-ant-…">
@@ -364,7 +375,6 @@ pre.json{margin:0;padding:12px;border-radius:8px;background:var(--surface-2);fon
       </div>
       <p class="muted" id="keyState" role="status"></p>
       <button type="button" class="linkbtn danger" id="keyClear">Schlüssel von diesem Gerät löschen</button>
-      <p class="muted">Einen Schlüssel erstellst du unter console.anthropic.com im Bereich API Keys. Setze dort am besten ein monatliches Ausgabenlimit.</p>
     </div>
   </section>
 </main>
@@ -486,7 +496,7 @@ function errCopy(e){
 }
 function errBase(e){
   var c = e && e.code;
-  if(c === 'no_key') return 'Trage zuerst unter „Optionen“ deinen Anthropic-API-Schlüssel ein.';
+  if(c === 'no_key') return 'Kein API-Schlüssel hinterlegt. Nutze unten „Foto im Claude-Chat auswerten“ (kostenlos) oder trage unter „Optionen“ einen Schlüssel ein.';
   if(c === 'bad_key') return 'Der API-Schlüssel wurde abgelehnt. Prüfe ihn unter „Optionen“ und das Guthaben deines API-Kontos.';
   if(c === 'network') return 'Keine Verbindung zu Anthropic. Prüfe dein Internet und versuche es noch einmal.';
   if(c === 'images_unavailable') return 'In dieser Ansicht kann Claude keine Fotos auswerten. Öffne die Seite im Browser unter claude.ai oder beschreibe die Mahlzeit in Worten.';
@@ -629,8 +639,22 @@ function applyResult(r){
   renderDraft(true);
   $('#result').scrollIntoView({behavior:'smooth', block:'start'});
 }
+function openChat(){ var c = $('#chatBox'); if(c) c.open = true; }
+function parseLoose(text){
+  var t = String(text).trim(), m;
+  try{ return JSON.parse(t); }catch(e){}
+  m = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if(m){ try{ return JSON.parse(m[1]); }catch(e){} }
+  var a = t.search(/[\[{]/), b = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
+  if(a >= 0 && b > a){ return JSON.parse(t.slice(a, b + 1)); }
+  throw new Error('kein JSON');
+}
 function analyze(refine){
-  if(!sample || state.busy) return;
+  if(state.busy) return;
+  if(!sample){
+    showMsg('Die automatische Erkennung ist in dieser Ansicht nicht verfügbar. Nutze unten „Foto im Claude-Chat auswerten“.');
+    openChat(); return;
+  }
   var hasPhoto = !!state.file && !imagesNo;
   var note = $('#note').value.trim();
   if(state.file && imagesNo && !note && !refine){ showMsg('In dieser Ansicht kann Claude keine Fotos auswerten. Beschreibe die Mahlzeit in Worten oder öffne die Seite im Browser unter claude.ai.'); return; }
@@ -651,12 +675,13 @@ function analyze(refine){
   }).catch(function(e){
     if(e && e.code === 'images_unavailable'){ imagesNo = true; renderPhoto(); }
     setDiag('Fehler ' + (e && e.code ? e.code : 'unbekannt') + (e && e.message ? ' · ' + String(e.message).slice(0, 120) : ''));
-    if(!e || e.code !== 'cancelled') showMsg(errCopy(e));
+    if(!e || e.code !== 'cancelled'){ showMsg(errCopy(e)); openChat(); }
   }).then(endBusy);
 }
 function addByText(){
   var txt = $('#addText').value.trim();
-  if(!txt || !sample || state.busy) return;
+  if(!txt || state.busy) return;
+  if(!sample){ showMsg('Die Textschätzung braucht die Verbindung zu Claude. Trage die Komponente von Hand ein („Leere Zeile einfügen“).'); return; }
   hideMsg();
   var created = false;
   if(!state.draft){ state.draft = {title:'Mahlzeit', hint:'', items:[]}; created = true; }
@@ -911,11 +936,8 @@ function renderAll(){
   var tk = dayKey(now);
   var t = sumMeals(state.meals.filter(function(m){ return dayKey(m.ts) === tk; }));
   $('#todayKcal').textContent = r0(t.kcal);
-  var canAnalyze = !state.initDone || !!sample;
-  $('#analyzeBtn').hidden = !canAnalyze;
-  var noAi = state.initDone && !sample;
-  $('#addText').parentNode.hidden = noAi;
-  $('#refineBox').hidden = noAi;
+  $('#analyzeBtn').hidden = false;
+  if(state.initDone && (!sample || imagesNo) && !state.chatAuto){ state.chatAuto = true; openChat(); }
   renderPhoto(); renderLog();
   if(state.tab === 'export') renderExport();
 }
@@ -950,6 +972,19 @@ $('#refineBtn').addEventListener('click', function(){
   analyze(t);
 });
 $('#saveBtn').addEventListener('click', saveMeal);
+$('#copyPrompt').addEventListener('click', function(){
+  var p = 'Ich schicke dir ein Foto meiner Mahlzeit.\n\n' + buildPrompt(null, true, $('#note').value.trim());
+  var fb = function(){ var ta = $('#promptFallback'); ta.hidden = false; ta.value = p; ta.focus(); ta.select(); toast('Text markiert. Jetzt kopieren.'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(p).then(function(){ toast('Anweisung kopiert'); }, fb); } else fb();
+});
+$('#pasteApply').addEventListener('click', function(){
+  var t = $('#pasteIn').value.trim();
+  if(!t){ showMsg('Füge zuerst die Antwort von Claude ein.'); return; }
+  var r;
+  try{ r = parseLoose(t); }catch(e){ showMsg('Die Antwort konnte nicht gelesen werden. Kopiere die ganze Antwort von Claude, auch den Teil mit den geschweiften Klammern.'); return; }
+  hideMsg(); applyResult(r);
+  if(state.draft){ $('#pasteIn').value = ''; setDiag('Ergebnis aus dem Chat übernommen'); }
+});
 $('#discardBtn').addEventListener('click', function(){ resetForm(); });
 $('#mealTitle').addEventListener('input', function(e){ if(state.draft) state.draft.title = e.target.value; });
 
@@ -1043,7 +1078,7 @@ function init(){
   }).then(function(){
     state.initDone = true;
     renderAll();
-    setDiag('Claude ' + (sample ? (sample.keyOk && !sample.keyOk() ? 'ohne Schlüssel (siehe Optionen)' : 'bereit') : 'nicht verfügbar') + ' · Fotoauswertung ' + (sample ? (imagesNo ? 'nicht möglich' : 'möglich') : '–') + ' · Speicher ' + (state.store === 'db' ? 'Konto' : 'nur dieses Gerät'));
+    setDiag('Claude ' + (sample ? (sample.keyOk && !sample.keyOk() ? 'ohne Schlüssel (Auswertung über den Chat möglich)' : 'bereit') : 'nicht verfügbar') + ' · Fotoauswertung ' + (sample ? (imagesNo ? 'nicht möglich' : 'möglich') : '–') + ' · Speicher ' + (state.store === 'db' ? 'Konto' : 'nur dieses Gerät'));
     if(state.pending){ state.pending = false; if(sample && !imagesNo && state.file && !state.busy){ analyze(null); } }
   });
 }
