@@ -221,7 +221,8 @@ pre.json{margin:0;padding:12px;border-radius:8px;background:var(--surface-2);fon
 
     <div class="field">
       <label class="cap" for="note">Beschreibung (optional)</label>
-      <textarea id="note" rows="2" placeholder="z. B. 4 Scheiben Vollkornbrot mit Camembert und Butter"></textarea>
+      <textarea id="note" rows="2" placeholder="z. B. 4 Scheiben Vollkornbrot, 40 g Camembert, 1 Banane"></textarea>
+      <p class="muted">Ohne Claude rechnet die App mit einer eingebauten Liste häufiger Lebensmittel (grobe Richtwerte).</p>
     </div>
     <div class="row2">
       <div class="field">
@@ -575,6 +576,7 @@ function onFile(file){
   setDiag('Foto gewählt (' + kb(file.size) + ')');
   if(!state.initDone){ state.pending = true; setDiag('Foto gewählt, warte auf die Verbindung zu Claude …'); return; }
   if(!sample){ setDiag('Foto gewählt, aber Claude ist in dieser Ansicht nicht verfügbar'); return; }
+  if(!hasAI()){ setDiag('Foto gewählt. Ohne API-Schlüssel läuft die Auswertung über den Claude-Chat'); openChat(); return; }
   if(imagesNo){ setDiag('Foto gewählt, aber diese Ansicht kann keine Fotos an Claude senden'); return; }
   if(!state.busy){ hideMsg(); analyze(null); }
 }
@@ -640,6 +642,241 @@ function applyResult(r){
   $('#result').scrollIntoView({behavior:'smooth', block:'start'});
 }
 function openChat(){ var c = $('#chatBox'); if(c) c.open = true; }
+function hasAI(){ return !!sample && !(sample.keyOk && !sample.keyOk()); }
+
+/* ---------- Eingebaute Lebensmittelliste (grobe Richtwerte pro 100 g) ----------
+   Eintrag: ['Anzeigename|Suchwort|Suchwort', kcal, Eiweiß, Kohlenhydrate, Fett, Mengen in g]
+   Mengen: sl Scheibe, st Stück, el Esslöffel, tl Teelöffel, po Portion, ta Tasse, gl Glas, hv Handvoll, ku Kugel, ds Dose, fl Flasche */
+var FOODS_RAW = [
+ ['Vollkornbrot|vollkornbrot|vollkornbrote|schwarzbrot|kornbrot',240,8.5,42,1.5,{sl:50,st:50}],
+ ['Roggenbrot|roggenbrot|roggenmischbrot',230,6,45,1.2,{sl:50,st:50}],
+ ['Brot|brot|brote|mischbrot|weissbrot|graubrot|bauernbrot|dinkelbrot',250,8,48,1.5,{sl:45,st:45}],
+ ['Toastbrot|toast|toastbrot|toastbrote',265,8,49,3,{sl:25,st:25}],
+ ['Brötchen|broetchen|semmel|semmeln|weck',265,8.5,52,1.5,{st:55,sl:55}],
+ ['Baguette|baguette',270,9,54,1.5,{sl:30,st:30}],
+ ['Brezel|brezel|breze|laugenbrezel|laugenbroetchen',290,9,57,2.5,{st:80}],
+ ['Knäckebrot|knaeckebrot|knaeckebrote',340,10,63,2,{sl:10,st:10}],
+ ['Reiswaffeln|reiswaffel|reiswaffeln|reiskuchen',380,8,80,2,{st:8,sl:8}],
+ ['Wrap|wrap|wraps|tortilla|tortillas',300,8,50,7,{st:60}],
+ ['Haferflocken|haferflocken|hafer|porridge',370,13,59,7,{el:10,po:50,ta:80}],
+ ['Müsli|muesli',370,10,62,7,{po:60,el:10}],
+ ['Cornflakes|cornflakes|cerealien',375,7,84,0.9,{po:30}],
+ ['Reis (gekocht)|reis|basmatireis|jasminreis|vollkornreis',130,2.7,28,0.3,{po:180,ta:150}],
+ ['Nudeln (gekocht)|nudeln|pasta|spaghetti|penne|fusilli|makkaroni|tagliatelle',160,5.5,31,1,{po:250}],
+ ['Kartoffeln|kartoffel|kartoffeln|pellkartoffeln|salzkartoffeln',77,2,17,0.1,{st:90,po:250}],
+ ['Bratkartoffeln|bratkartoffel|bratkartoffeln',150,3,20,6.5,{po:250}],
+ ['Pommes|pommes|pommes frites',290,4,40,13,{po:150}],
+ ['Süßkartoffel|suesskartoffel|suesskartoffeln',86,1.6,20,0.1,{st:200,po:250}],
+ ['Couscous (gekocht)|couscous',112,3.8,23,0.2,{po:200}],
+ ['Quinoa (gekocht)|quinoa',120,4.4,21,1.9,{po:180}],
+ ['Pfannkuchen|pfannkuchen|palatschinken|eierkuchen|crepe',190,6,28,6,{st:80}],
+ ['Pizza|pizza',250,10,30,10,{st:350,po:350,sl:120}],
+ ['Ei|ei|eier|eiern',143,12.6,0.7,9.5,{st:55}],
+ ['Rührei|ruehrei|ruehreier',150,10,1.5,11,{po:120,st:120}],
+ ['Spiegelei|spiegelei|spiegeleier',190,13,1,15,{st:60}],
+ ['Milch (3,5 %)|milch|vollmilch',65,3.4,4.8,3.6,{gl:200,ta:200,po:200}],
+ ['Milch (1,5 %)|fettarme milch|milch 1,5|h-milch',47,3.4,4.8,1.5,{gl:200,ta:200,po:200}],
+ ['Pflanzendrink|pflanzendrink|sojadrink|sojamilch|haferdrink|hafermilch|mandeldrink|mandelmilch',42,2,4,1.8,{gl:200,ta:200,po:200}],
+ ['Joghurt|joghurt|jogurt|naturjoghurt',65,3.5,4.7,3.8,{po:150,el:25,ta:150}],
+ ['Skyr|skyr',63,11,4,0.2,{po:150,el:25}],
+ ['Magerquark|magerquark|quark',67,12,4,0.3,{po:125,el:25}],
+ ['Hüttenkäse|huettenkaese|cottage cheese|koerniger frischkaese',98,12,3,4.3,{po:100,el:25}],
+ ['Frischkäse|frischkaese',250,6,3,24,{el:20,po:30,tl:7}],
+ ['Butter|butter',740,0.6,0.6,82,{el:12,tl:5,sl:10,po:10,st:10}],
+ ['Margarine|margarine',720,0.2,0.4,80,{el:12,tl:5,po:10}],
+ ['Sahne|sahne|schlagsahne|kochsahne',300,2.4,3.2,31,{el:15,po:50}],
+ ['Schmand|schmand|saure sahne|creme fraiche',200,3,4,20,{el:20,po:30}],
+ ['Gouda|gouda|schnittkaese|kaese|edamer|tilsiter',350,25,0.1,28,{sl:25,st:25,po:30}],
+ ['Emmentaler|emmentaler|bergkaese|gruyere',380,28,0,30,{sl:25,po:30}],
+ ['Mozzarella|mozzarella',250,19,1,19,{st:125,po:60,sl:20}],
+ ['Feta|feta|schafskaese|hirtenkaese',265,14,1,22,{po:50,st:50}],
+ ['Camembert|camembert|brie',300,20,0.5,24,{po:40,sl:20,st:125}],
+ ['Parmesan|parmesan|grana padano',400,36,0,28,{el:8,tl:3,po:15}],
+ ['Halloumi|halloumi|grillkaese',320,22,2,25,{sl:40,st:40,po:80}],
+ ['Proteinpulver|proteinpulver|eiweisspulver|whey|proteinshake|protein shake|eiweissshake',380,78,6,6,{po:30,el:15}],
+ ['Gainer|gainer|massegainer',380,20,65,5,{po:80,el:20}],
+ ['Linsen (gekocht)|linsen',116,9,20,0.4,{po:200}],
+ ['Kichererbsen (gekocht)|kichererbsen',140,8,20,2.6,{po:150}],
+ ['Bohnen (gekocht)|kidneybohnen|bohnen|weisse bohnen',125,8,22,0.5,{po:150}],
+ ['Tofu|tofu',120,13,2,7,{po:100,sl:50}],
+ ['Räuchertofu|raeuchertofu',150,16,1.5,9,{po:100}],
+ ['Tempeh|tempeh',190,19,9,11,{po:100}],
+ ['Hummus|hummus',230,7,10,18,{el:20,po:50}],
+ ['Falafel|falafel',330,13,32,18,{st:20,po:100}],
+ ['Erdnussbutter|erdnussbutter|erdnussmus',600,25,12,50,{el:16,tl:8}],
+ ['Mandelmus|mandelmus|nussmus',620,21,8,55,{el:16,tl:8}],
+ ['Veggie-Burger|veggie burger|veggieburger|vegetarisches schnitzel|veganes schnitzel|veggie patty',200,17,8,10,{st:100,po:100}],
+ ['Banane|banane|bananen',90,1.2,20,0.2,{st:120}],
+ ['Apfel|apfel|aepfel',52,0.3,12,0.2,{st:180}],
+ ['Birne|birne|birnen',55,0.5,13,0.2,{st:170}],
+ ['Orange|orange|orangen|clementine|mandarine',47,0.9,9,0.2,{st:150}],
+ ['Weintrauben|weintrauben|trauben|traube',70,0.7,16,0.2,{hv:100,po:150}],
+ ['Erdbeeren|erdbeere|erdbeeren',32,0.7,6,0.3,{po:150,hv:80}],
+ ['Beeren|heidelbeeren|blaubeeren|beeren|himbeeren',45,0.8,9,0.4,{po:100,hv:60}],
+ ['Melone|melone|wassermelone|honigmelone',35,0.6,7.5,0.1,{sl:200,po:200}],
+ ['Ananas|ananas',55,0.5,12,0.1,{sl:80,po:150}],
+ ['Mango|mango',60,0.8,14,0.4,{st:250,po:150}],
+ ['Kiwi|kiwi',50,1,10,0.5,{st:75}],
+ ['Avocado|avocado',160,2,2,15,{st:150}],
+ ['Datteln|datteln|dattel',280,2.5,65,0.4,{st:8,hv:40}],
+ ['Rosinen|rosinen|trockenfruechte|cranberries',300,3,70,0.5,{hv:30,el:12,po:30}],
+ ['Mandeln|mandeln|mandel',580,21,10,50,{hv:30,st:1.2,el:10}],
+ ['Walnüsse|walnuesse|walnuss',650,15,7,65,{hv:30,st:5}],
+ ['Cashews|cashews|cashewkerne',570,18,28,45,{hv:30}],
+ ['Erdnüsse|erdnuesse|erdnuss',600,26,10,50,{hv:30}],
+ ['Haselnüsse|haselnuesse|haselnuss',630,15,10,61,{hv:30}],
+ ['Nüsse (gemischt)|nuesse|nussmischung|studentenfutter|trail mix',600,18,15,52,{hv:30,po:30}],
+ ['Chiasamen|chiasamen|chia',490,17,8,31,{el:12,tl:4}],
+ ['Leinsamen|leinsamen|leinsaat',530,18,2,42,{el:10}],
+ ['Sonnenblumenkerne|sonnenblumenkerne',580,21,15,48,{el:10,hv:30}],
+ ['Kürbiskerne|kuerbiskerne',560,30,5,46,{el:10,hv:30}],
+ ['Tomate|tomate|tomaten|kirschtomaten|cherrytomaten',18,0.9,2.6,0.2,{st:100,po:150}],
+ ['Gurke|gurke|gurken|salatgurke',12,0.6,1.8,0.2,{st:300,po:100,sl:10}],
+ ['Paprika|paprika',30,1,5,0.3,{st:150}],
+ ['Karotte|karotte|karotten|moehre|moehren|moehrchen',35,0.8,7,0.2,{st:70,po:100}],
+ ['Brokkoli|brokkoli',34,3,4,0.4,{po:200}],
+ ['Blumenkohl|blumenkohl',25,2,2.5,0.3,{po:200}],
+ ['Spinat|spinat',23,2.7,0.6,0.4,{po:150}],
+ ['Salat|salat|blattsalat|eisbergsalat|rucola|feldsalat',15,1.3,1.5,0.2,{po:100}],
+ ['Zucchini|zucchini',20,2,2,0.4,{st:250,po:150}],
+ ['Aubergine|aubergine',25,1,3,0.3,{st:250,po:150}],
+ ['Champignons|champignons|pilze',22,3,0.5,0.3,{po:150}],
+ ['Zwiebel|zwiebel|zwiebeln',40,1.2,8,0.2,{st:80}],
+ ['Mais|mais|maiskoerner',80,2.5,13,1.5,{po:100,el:15}],
+ ['Erbsen|erbsen',80,5,12,0.4,{po:100}],
+ ['Gemüse (gemischt)|gemuese|gemuesepfanne|ofengemuese',40,2,6,0.5,{po:200}],
+ ['Kürbis|kuerbis',26,1,5,0.1,{po:200}],
+ ['Ketchup|ketchup',110,1.5,25,0.1,{el:15,tl:5}],
+ ['Mayonnaise|mayonnaise|mayo',700,1,1,77,{el:15,tl:5}],
+ ['Senf|senf',70,5,3,4,{tl:5,el:15}],
+ ['Pesto|pesto',450,5,5,45,{el:15,tl:5}],
+ ['Tomatensoße|tomatensosse|tomatensauce|passierte tomaten',40,1.5,7,0.5,{po:150,el:20}],
+ ['Olivenöl|olivenoel|oel|rapsoel|sonnenblumenoel|kokosoel|speiseoel',884,0,0,100,{el:11,tl:4,po:11}],
+ ['Honig|honig',305,0.4,76,0,{el:20,tl:7}],
+ ['Zucker|zucker',400,0,100,0,{tl:5,el:12}],
+ ['Marmelade|marmelade|konfituere|gelee',250,0.4,60,0,{el:20,tl:8,po:20}],
+ ['Nuss-Nougat-Creme|nutella|nussnougatcreme|nuss nougat creme',540,6,57,31,{el:20,tl:7,po:15}],
+ ['Schokolade|schokolade|schoko',540,6,57,31,{st:5,po:25,hv:30}],
+ ['Gummibärchen|gummibaerchen|gummibaer|fruchtgummi|bonbons',340,6.5,77,0,{hv:30,po:30}],
+ ['Kekse|kekse|keks|plaetzchen|cookies',450,6,70,16,{st:10}],
+ ['Kuchen|kuchen|torte|muffin',350,5,50,15,{st:100,sl:100,po:100}],
+ ['Eis|eis|eiscreme|speiseeis',200,3.5,24,10,{ku:50,po:100}],
+ ['Chips|chips|kartoffelchips|salzstangen',530,6,50,33,{hv:30,po:50}],
+ ['Müsliriegel|muesliriegel|riegel|cerealienriegel',400,7,60,14,{st:30}],
+ ['Proteinriegel|proteinriegel|eiweissriegel',370,30,35,11,{st:55}],
+ ['Wasser|wasser|mineralwasser|sprudel',0,0,0,0,{gl:200,fl:500}],
+ ['Kaffee/Tee|kaffee|espresso|tee|schwarzer tee|gruener tee',2,0.1,0.3,0,{ta:200}],
+ ['Cola/Limo|cola|limo|limonade|fanta|sprite|eistee',42,0,10.6,0,{gl:200,ds:330,fl:500}],
+ ['Saft|orangensaft|saft|apfelsaft|multivitaminsaft',45,0.7,10,0.2,{gl:200}],
+ ['Schorle|apfelschorle|saftschorle|schorle',25,0.1,6,0,{gl:250,fl:500}],
+ ['Bier|bier|radler|weizen|pils',43,0.4,3.5,0,{gl:330,fl:500,ds:500}],
+ ['Wein|wein|rotwein|weisswein|sekt',80,0.1,2.5,0,{gl:150}]
+];
+function norm(s){
+  return String(s).toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9%\/., ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+var FOODS = FOODS_RAW.map(function(r){
+  var parts = r[0].split('|');
+  return {name:parts[0], a:parts.map(norm), k:r[1], p:r[2], c:r[3], f:r[4], u:r[5] || {}};
+});
+function findFood(name){
+  var n = ' ' + norm(name) + ' ', words = n.trim().split(' '), best = null, bl = 0;
+  FOODS.forEach(function(f){
+    f.a.forEach(function(a){
+      var ok = a.indexOf(' ') >= 0 ? n.indexOf(' ' + a) >= 0 : words.some(function(w){ return w === a || (a.length >= 4 && w.indexOf(a) === 0); });
+      if(ok && a.length > bl){ best = f; bl = a.length; }
+    });
+  });
+  return best;
+}
+var QWORDS = {ein:1, eine:1, einen:1, einem:1, einer:1, zwei:2, drei:3, vier:4, fuenf:5, sechs:6, sieben:7, acht:8, neun:9, zehn:10, halbe:0.5, halber:0.5, halben:0.5, halbes:0.5};
+var UNITS = {g:'g', gr:'g', gramm:'g', kg:'kg', ml:'ml', l:'l', liter:'l', el:'el', essloeffel:'el', tl:'tl', teeloeffel:'tl',
+  scheibe:'sl', scheiben:'sl', stueck:'st', stuecke:'st', stk:'st', riegel:'st', portion:'po', portionen:'po', scoop:'po', messloeffel:'po',
+  becher:'po', tasse:'ta', tassen:'ta', glas:'gl', glaeser:'gl', handvoll:'hv', kugel:'ku', kugeln:'ku', dose:'ds', dosen:'ds', flasche:'fl', flaschen:'fl'};
+function gramsFor(food, q, unit, hasQty){
+  var u = food.u;
+  switch(unit){
+    case 'g': return q;
+    case 'kg': return q * 1000;
+    case 'ml': return q;
+    case 'l': return q * 1000;
+    case 'el': return q * (u.el || 15);
+    case 'tl': return q * (u.tl || 5);
+    case 'sl': return q * (u.sl || u.st || 30);
+    case 'st': return q * (u.st || u.po || 100);
+    case 'po': return q * (u.po || u.st || 100);
+    case 'ta': return q * (u.ta || 200);
+    case 'gl': return q * (u.gl || 200);
+    case 'hv': return q * (u.hv || 30);
+    case 'ku': return q * (u.ku || 50);
+    case 'ds': return q * (u.ds || 330);
+    case 'fl': return q * (u.fl || 500);
+    default: return q * (hasQty ? (u.st || u.po || 100) : (u.po || u.st || 100));
+  }
+}
+/* Ein Textstück wie "4 Scheiben Vollkornbrot" oder "60g Camembert" auswerten. */
+function parseSeg(seg){
+  var s = norm(seg).replace(/^(ca\.?|etwa|circa)\s+/, ''), m, qty = null, unit = null;
+  if(!s) return null;
+  m = s.match(/^(\d+(?:[.,]\d+)?)\s*(kg|g|gr|gramm|ml|l|el|tl)\b\s*(.*)$/);
+  if(m){ qty = parseFloat(m[1].replace(',', '.')); unit = UNITS[m[2]]; s = m[3]; }
+  else {
+    m = s.match(/^(\d+(?:[.,]\d+)?|\d+\/\d+|ein|eine|einen|einem|einer|zwei|drei|vier|fuenf|sechs|sieben|acht|neun|zehn|halbe|halber|halben|halbes)\b\s*(.*)$/);
+    if(m){
+      var w = m[1];
+      qty = QWORDS[w] != null ? QWORDS[w] : (w.indexOf('/') > 0 ? parseFloat(w.split('/')[0]) / parseFloat(w.split('/')[1]) : parseFloat(w.replace(',', '.')));
+      s = m[2];
+    }
+    m = s.match(/^(kg|g|gr|gramm|ml|l|liter|el|essloeffel|tl|teeloeffel|scheibe|scheiben|stueck|stuecke|stk|riegel|portion|portionen|scoop|messloeffel|becher|tasse|tassen|glas|glaeser|handvoll|kugel|kugeln|dose|dosen|flasche|flaschen)\b\s*(?:von\s+|aus\s+)?(.*)$/);
+    if(m){ unit = UNITS[m[1]]; s = m[2]; if(qty == null) qty = 1; }
+  }
+  var food = findFood(s || seg);
+  if(!food) return {food:null, name:String(seg).trim()};
+  return {food:food, name:food.name, g:Math.max(0, gramsFor(food, qty == null ? 1 : qty, unit, qty != null))};
+}
+function localItems(text){
+  var segs = String(text).split(/\s*(?:\n|;|\+|&|\bund\b|\bmit\b|,(?!\d))\s*/).filter(function(x){ return x && x.trim(); });
+  var out = [], unknown = [];
+  segs.forEach(function(sg){
+    var r = parseSeg(sg);
+    if(!r) return;
+    if(r.food){
+      out.push({name:r.food.name, gramm:Math.round(r.g), kcal_pro_100g:r.food.k, protein_pro_100g:r.food.p, kohlenhydrate_pro_100g:r.food.c, fett_pro_100g:r.food.f, sicherheit:'mittel'});
+    } else {
+      unknown.push(sg.trim());
+      out.push({name:sg.trim().slice(0, 80), gramm:0, kcal_pro_100g:0, protein_pro_100g:0, kohlenhydrate_pro_100g:0, fett_pro_100g:0, sicherheit:'niedrig'});
+    }
+  });
+  return {komponenten:out, unknown:unknown};
+}
+function localEstimate(note, afterError){
+  var r = localItems(note);
+  var known = r.komponenten.filter(function(k){ return k.gramm > 0; }).length;
+  if(!known){
+    if(!afterError) showMsg('Aus dem Text konnte ich nichts erkennen. Schreibe es zum Beispiel so: „4 Scheiben Vollkornbrot, 40 g Camembert, 1 Banane“, oder trage die Komponenten von Hand ein.');
+    return false;
+  }
+  hideMsg();
+  applyResult({titel:'Mahlzeit', komponenten:r.komponenten,
+    hinweis:(afterError ? 'Claude war nicht erreichbar. ' : '') + 'Grobe Richtwerte aus der eingebauten Liste, keine KI-Schätzung. Prüfe die Mengen.' + (r.unknown.length ? ' Nicht erkannt: ' + r.unknown.join(', ') + '. Bitte selbst eintragen.' : '')});
+  setDiag('Richtwerte aus der eingebauten Liste');
+  return true;
+}
+function addLocal(txt){
+  var r = localItems(txt);
+  if(!r.komponenten.some(function(k){ return k.gramm > 0; })){
+    showMsg('Das habe ich in der Liste nicht gefunden. Trage die Komponente von Hand ein („Leere Zeile einfügen“).');
+    return false;
+  }
+  hideMsg();
+  if(!state.draft) state.draft = {title:'Mahlzeit', hint:'', items:[]};
+  r.komponenten.forEach(function(k){ state.draft.items.push(toItem(k)); });
+  $('#addText').value = '';
+  renderDraft(true);
+  setDiag('Richtwerte aus der eingebauten Liste');
+  return true;
+}
 function parseLoose(text){
   var t = String(text).trim(), m;
   try{ return JSON.parse(t); }catch(e){}
@@ -651,8 +888,11 @@ function parseLoose(text){
 }
 function analyze(refine){
   if(state.busy) return;
-  if(!sample){
-    showMsg('Die automatische Erkennung ist in dieser Ansicht nicht verfügbar. Nutze unten „Foto im Claude-Chat auswerten“.');
+  if(!hasAI()){
+    var n0 = $('#note').value.trim();
+    if(refine){ showMsg('Die Korrektur braucht die Verbindung zu Claude. Ändere die Werte direkt in den Zeilen.'); return; }
+    if(n0){ if(!localEstimate(n0, false)) openChat(); return; }
+    showMsg('Für Fotos gibt es hier keine automatische Erkennung. Nutze unten „Foto im Claude-Chat auswerten“ oder beschreibe die Mahlzeit im Textfeld und tippe auf „Kalorien schätzen“.');
     openChat(); return;
   }
   var hasPhoto = !!state.file && !imagesNo;
@@ -675,13 +915,17 @@ function analyze(refine){
   }).catch(function(e){
     if(e && e.code === 'images_unavailable'){ imagesNo = true; renderPhoto(); }
     setDiag('Fehler ' + (e && e.code ? e.code : 'unbekannt') + (e && e.message ? ' · ' + String(e.message).slice(0, 120) : ''));
-    if(!e || e.code !== 'cancelled'){ showMsg(errCopy(e)); openChat(); }
+    if(!e || e.code !== 'cancelled'){
+      showMsg(errCopy(e)); openChat();
+      var n1 = $('#note').value.trim();
+      if(n1 && !refine) localEstimate(n1, true);
+    }
   }).then(endBusy);
 }
 function addByText(){
   var txt = $('#addText').value.trim();
   if(!txt || state.busy) return;
-  if(!sample){ showMsg('Die Textschätzung braucht die Verbindung zu Claude. Trage die Komponente von Hand ein („Leere Zeile einfügen“).'); return; }
+  if(!hasAI()){ addLocal(txt); return; }
   hideMsg();
   var created = false;
   if(!state.draft){ state.draft = {title:'Mahlzeit', hint:'', items:[]}; created = true; }
@@ -695,7 +939,7 @@ function addByText(){
     created = false;
     renderDraft(true);
   }).catch(function(e){
-    if(!e || e.code !== 'cancelled') showMsg(errCopy(e));
+    if(!e || e.code !== 'cancelled'){ showMsg(errCopy(e)); addLocal(txt); }
   }).then(function(){
     if(created && state.draft && !state.draft.items.length) state.draft = null;
     endBusy(); renderDraft(true);
@@ -972,6 +1216,26 @@ $('#refineBtn').addEventListener('click', function(){
   analyze(t);
 });
 $('#saveBtn').addEventListener('click', saveMeal);
+/* Von Hand: Name eintippen füllt Menge und Nährwerte aus der eingebauten Liste. */
+$('#comps').addEventListener('change', function(e){
+  var inp = e.target.closest('input[data-f="name"]');
+  if(!inp || !state.draft) return;
+  var row = inp.closest('.comp');
+  var it = state.draft.items.filter(function(x){ return x.id === row.dataset.id; })[0];
+  if(!it || it.k100 > 0 || it.kFlat != null) return;
+  var r = parseSeg(inp.value);
+  if(!r || !r.food) return;
+  var f = r.food;
+  it.k100 = f.k; it.p100 = f.p; it.c100 = f.c; it.f100 = f.f; it.conf = 'mittel'; it.name = f.name;
+  if(!(it.g > 0)) it.g = Math.round(r.g);
+  inp.value = it.name;
+  row.querySelector('[data-f="g"]').value = fmtIn(it.g);
+  row.querySelector('[data-f="kcal"]').value = Math.round(calc(it).kcal);
+  rowMeta(row, it);
+  var meta = row.querySelector('.comp-meta');
+  if(meta && !meta.querySelector('.conf')) meta.insertAdjacentHTML('beforeend', '<span class="conf">Richtwert aus Liste</span>');
+  updateTotals();
+});
 $('#copyPrompt').addEventListener('click', function(){
   var p = 'Ich schicke dir ein Foto meiner Mahlzeit.\n\n' + buildPrompt(null, true, $('#note').value.trim());
   var fb = function(){ var ta = $('#promptFallback'); ta.hidden = false; ta.value = p; ta.focus(); ta.select(); toast('Text markiert. Jetzt kopieren.'); };
