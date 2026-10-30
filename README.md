@@ -13,6 +13,10 @@ Mahlzeit fotografieren, Kalorien und Makros schätzen lassen, Komponenten anpass
 - **iPhone (Safari):** Teilen-Symbol → „Zum Home-Bildschirm“.
 - **Android (Chrome):** Menü → „App installieren“ oder „Zum Startbildschirm hinzufügen“.
 
+## Ohne KI rechnen
+
+Die App enthält eine Liste häufiger Lebensmittel mit groben Richtwerten. Unter „Erfassen“ kannst du Text wie „4 Scheiben Vollkornbrot, 40 g Camembert, 1 Banane“ eintragen und auf „Kalorien schätzen“ tippen. Bei von Hand angelegten Zeilen füllt die App Gramm und Nährwerte aus, sobald du einen Namen wie „Skyr“ eingibst. Was nicht in der Liste steht, trägst du selbst ein.
+
 ## Foto-Erkennung
 
 **Kostenlos über den Claude-Chat (ohne Schlüssel):** Unter „Erfassen“ öffnest du „Foto im Claude-Chat auswerten“, kopierst die Anweisung, schickst sie zusammen mit deinem Foto in der Claude-App oder bei claude.ai an Claude und fügst die Antwort wieder in die App ein. Danach kannst du jede Komponente anpassen.
